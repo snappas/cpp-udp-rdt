@@ -92,7 +92,10 @@ char *corrupt(char *buffer) {
   std::uniform_int_distribution<int> c(0,95);
   int index = i(generator);
   char character = (char) c(generator);
-  buffer[index] = character;
+  if (len > 0) {
+    buffer[index] = character;
+  }
+
   return buffer;
 }
 

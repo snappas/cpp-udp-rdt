@@ -10,6 +10,7 @@
 #include <cstring>
 #include <string>
 #include <arpa/inet.h>
+#include <sstream>
 
 struct packet{
   std::string checksum;
@@ -18,6 +19,18 @@ struct packet{
   packet(){
     seq = -1;
   }
+  packet(std::string checksum_, int seq_, std::string payload_) {
+    checksum = checksum_;
+    seq = seq_;
+    payload = payload_;
+  }
+
+  std::string to_string() {
+    std::stringstream ss;
+    ss << checksum << " " << seq << " " << payload;
+    return ss.str();
+  }
+
 };
 
 class RDT {
@@ -42,7 +55,11 @@ class RDT {
   bool handshake();
   std::string checksum(std::string data);
   bool fin();
-
+  void send_pkt(packet pkt);
+  packet recv_pkt();
+  bool timeout(int socket);
+  packet make_ack(packet pkt);
+  void establish_destination(std::string destination_address, int destination_port);
 };
 
 
