@@ -43,13 +43,14 @@ void RDT::establish_destination(std::string destination_address, int destination
 
 bool RDT::handshake() {
   while (!ack_received) {
-    packet syn("SYN", 0, "");
+    packet syn(SYN, "", 0, "");
     send_pkt(syn);
 
     std::cout << "Sent SYN " << syn.seq << std::endl;
     if (!timeout(recv_socket)) {
       packet recv = recv_pkt();
-      if (recv.checksum.compare(syn.checksum) == 0 && recv.seq == syn.seq) {
+      if (recv.checksum.compare(syn.checksum) == 0 && recv.seq == syn.seq
+          && recv.options & SYN && recv.options & ACK) {
         ack_received = true;
         std::cout << "SYN-ACK " << recv.seq << " received" << std::endl;
       }
@@ -70,7 +71,7 @@ bool RDT::send(std::string content) {
       segment.append(content, 0, segment_size);
       content.erase(0, segment_size);
     }
-    packet pkt(checksum(segment), sequence_number, segment);
+    packet pkt(DATA, checksum(segment), sequence_number, segment);
 
     ack_received = false;
 
@@ -79,9 +80,8 @@ bool RDT::send(std::string content) {
       std::cout << "Sent seq " << pkt.seq << std::endl;
       if (!timeout(recv_socket)) {
         packet recv = recv_pkt();
-        std::cout << "recv'd checksum: " << recv.checksum << " seq: " << recv.seq << " payload: " << recv.payload
-            << std::endl;
-        if (recv.checksum.compare(pkt.checksum) == 0 && recv.seq == pkt.seq && recv.payload.compare("ACK") == 0) {
+        if (recv.checksum.compare(pkt.checksum) == 0 && recv.seq == pkt.seq
+            && recv.options & ACK && recv.options & DATA) {
           ack_received = true;
           std::cout << "ACK " << recv.seq << " received" << std::endl;
         }
@@ -101,12 +101,13 @@ bool RDT::fin() {
   ack_received = false;
   int timeout_count = 0;
   while (!ack_received) {
-    packet fin("FIN", sequence_number, "");
+    packet fin(FIN, "", sequence_number, "");
     send_pkt(fin);
     std::cout << "Sent FIN " << fin.seq << std::endl;
     if (!timeout(recv_socket)) {
       packet recv = recv_pkt();
-      if (recv.checksum.compare(fin.checksum) == 0 && recv.seq == fin.seq) {
+      if (recv.checksum.compare(fin.checksum) == 0 && recv.seq == fin.seq
+          && recv.options & FIN && recv.options & ACK) {
         ack_received = true;
         std::cout << "FIN-ACK " << recv.seq << " received" << std::endl;
       }
@@ -132,12 +133,12 @@ std::string RDT::recv(std::string destination_address, int destination_port) {
     packet ack_pkt = make_ack(pkt);
 
     if ((checksum(pkt.payload).compare(pkt.checksum) == 0 && pkt.seq == sequence_number)
-        || (pkt.checksum.compare("SYN") == 0 || pkt.checksum.compare("FIN") == 0)) {
+        || pkt.options & SYN || pkt.options & FIN) {
       send_pkt(ack_pkt);
-      if (pkt.checksum.compare("SYN") == 0) {
+      if (pkt.options & SYN) {
         sequence_number = 0;
         syn_received = true;
-      } else if (pkt.checksum.compare("FIN") == 0) {
+      } else if (pkt.options & FIN) {
         if (syn_received) {
           fin_received = true;
         }
@@ -175,7 +176,8 @@ packet RDT::recv_pkt() {
 
 packet RDT::make_ack(packet pkt) {
   packet ack_pkt;
-  ack_pkt.payload = "ACK";
+  ack_pkt.options = pkt.options | ACK;
+  ack_pkt.payload = "";
   ack_pkt.seq = pkt.seq;
   ack_pkt.checksum = pkt.checksum;
   return ack_pkt;

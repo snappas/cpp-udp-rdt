@@ -12,11 +12,11 @@
 #include <arpa/inet.h>
 #include <jsoncpp/json/json.h>
 
-enum class PacketOptions {
+enum PacketOptions {
   ACK = (1 << 0),
   SYN = (2 << 0),
-  FIN = (3 << 0),
-  DAT = (4 << 0)
+  FIN = (4 << 0),
+  DATA = (8 << 0)
 };
 
 struct packet{
@@ -29,10 +29,11 @@ struct packet{
     seq = -1;
   }
 
-  packet(std::string checksum_, int seq_, std::string payload_) {
+  packet(uint options_, std::string checksum_, int seq_, std::string payload_) {
     checksum = checksum_;
     seq = seq_;
     payload = payload_;
+    options = options_;
   }
 
   std::string to_json() {
