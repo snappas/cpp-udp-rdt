@@ -10,25 +10,49 @@
 #include <cstring>
 #include <string>
 #include <arpa/inet.h>
-#include <sstream>
+#include <jsoncpp/json/json.h>
+
+enum class PacketOptions {
+  ACK = (1 << 0),
+  SYN = (2 << 0),
+  FIN = (3 << 0),
+  DAT = (4 << 0)
+};
 
 struct packet{
+  uint options;
   std::string checksum;
   int seq;
   std::string payload;
+
   packet(){
     seq = -1;
   }
+
   packet(std::string checksum_, int seq_, std::string payload_) {
     checksum = checksum_;
     seq = seq_;
     payload = payload_;
   }
 
-  std::string to_string() {
-    std::stringstream ss;
-    ss << checksum << " " << seq << " " << payload;
-    return ss.str();
+  std::string to_json() {
+    Json::Value root;
+    Json::FastWriter writer;
+    root["options"] = options;
+    root["checksum"] = checksum;
+    root["seq"] = seq;
+    root["payload"] = payload;
+    return writer.write(root);
+  }
+
+  void from_json(char *buffer) {
+    Json::Reader reader;
+    Json::Value root;
+    reader.parse(buffer, root);
+    options = root.get("options", 0).asUInt();
+    seq = root.get("seq", 0).asInt();
+    checksum = root.get("checksum", "").asString();
+    payload = root.get("payload", "").asString();
   }
 
 };

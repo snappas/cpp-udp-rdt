@@ -4,6 +4,7 @@ project(udp-rdt)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 
 add_library(RDT RDT.cpp)
+target_link_libraries(RDT jsoncpp)
 target_include_directories(RDT PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_executable(Sender sender.cpp)

@@ -10,8 +10,8 @@
 RDT::RDT(size_t segment_size_) : segment_size(segment_size_) {
   ack_received = false;
   sequence_number = 0;
-
 }
+
 bool RDT::listen(std::string listen_address, int listen_port) {
   recv_socket = socket(AF_INET, SOCK_DGRAM, 0);
   std::memset(&recv_addr, 0, sizeof(recv_addr));
@@ -155,7 +155,7 @@ std::string RDT::recv(std::string destination_address, int destination_port) {
 }
 
 void RDT::send_pkt(packet pkt) {
-  std::string send_string = pkt.to_string();
+  std::string send_string = pkt.to_json();
   sendto(send_socket,
          &send_string[0],
          send_string.size(),
@@ -168,8 +168,7 @@ packet RDT::recv_pkt() {
   packet recv;
   char buffer[4096];
   recvfrom(recv_socket, buffer, 4096, 0, (struct sockaddr *) &recv_addr, NULL);
-  std::stringstream ss(buffer);
-  ss >> recv.checksum >> recv.seq >> recv.payload;
+  recv.from_json(buffer);
   std::memset(buffer, 0, 4096);
   return recv;
 }
