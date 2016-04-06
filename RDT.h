@@ -5,6 +5,7 @@
 #ifndef UDP_RDT_SENDER_RDT_H
 #define UDP_RDT_SENDER_RDT_H
 
+#include "packet.h"
 
 #include <cstdio>
 #include <cstring>
@@ -12,51 +13,7 @@
 #include <arpa/inet.h>
 #include <jsoncpp/json/json.h>
 
-enum PacketOptions {
-  ACK = (1 << 0),
-  SYN = (2 << 0),
-  FIN = (4 << 0),
-  DATA = (8 << 0)
-};
 
-struct packet{
-  uint options;
-  std::string checksum;
-  int seq;
-  std::string payload;
-
-  packet(){
-    seq = -1;
-  }
-
-  packet(uint options_, std::string checksum_, int seq_, std::string payload_) {
-    checksum = checksum_;
-    seq = seq_;
-    payload = payload_;
-    options = options_;
-  }
-
-  std::string to_json() {
-    Json::Value root;
-    Json::FastWriter writer;
-    root["options"] = options;
-    root["checksum"] = checksum;
-    root["seq"] = seq;
-    root["payload"] = payload;
-    return writer.write(root);
-  }
-
-  void from_json(char *buffer) {
-    Json::Reader reader;
-    Json::Value root;
-    reader.parse(buffer, root);
-    options = root.get("options", 0).asUInt();
-    seq = root.get("seq", 0).asInt();
-    checksum = root.get("checksum", "").asString();
-    payload = root.get("payload", "").asString();
-  }
-
-};
 
 class RDT {
  public:
@@ -78,13 +35,15 @@ class RDT {
 
 
   bool handshake();
-  std::string checksum(std::string data);
+
   bool fin();
   void send_pkt(packet pkt);
   packet recv_pkt();
   bool timeout(int socket);
   packet make_ack(packet pkt);
   void establish_destination(std::string destination_address, int destination_port);
+  bool is_ack(packet response, packet request);
+  bool valid_packet(packet response, packet request);
 };
 
 

@@ -5,6 +5,7 @@
 #include <sstream>
 #include <iostream>
 #include <poll.h>
+#include <random>
 #include "RDT.h"
 
 RDT::RDT(size_t segment_size_) : segment_size(segment_size_) {
@@ -42,17 +43,19 @@ void RDT::establish_destination(std::string destination_address, int destination
 }
 
 bool RDT::handshake() {
+  std::random_device random;
+  std::uniform_int_distribution<int> dist(1, 2147483647);
+  sequence_number = dist(random) % 65536;
   while (!ack_received) {
-    packet syn(SYN, "", 0, "");
+    packet syn(PacketOptions::SYN, sequence_number, "");
     send_pkt(syn);
 
-    std::cout << "Sent SYN " << syn.seq << std::endl;
+    std::cout << "Sent SYN " << syn.seqnum << std::endl;
     if (!timeout(recv_socket)) {
       packet recv = recv_pkt();
-      if (recv.checksum.compare(syn.checksum) == 0 && recv.seq == syn.seq
-          && recv.options & SYN && recv.options & ACK) {
+      if (is_ack(recv, syn) && valid_packet(recv, syn)) {
         ack_received = true;
-        std::cout << "SYN-ACK " << recv.seq << " received" << std::endl;
+        std::cout << "SYN-ACK " << recv.seqnum << " received" << std::endl;
       }
     } else {
       std::cout << "timeout" << std::endl;
@@ -71,26 +74,27 @@ bool RDT::send(std::string content) {
       segment.append(content, 0, segment_size);
       content.erase(0, segment_size);
     }
-    packet pkt(DATA, checksum(segment), sequence_number, segment);
+    packet pkt(PacketOptions::DATA, sequence_number, segment);
 
     ack_received = false;
 
     while (!ack_received) {
       send_pkt(pkt);
-      std::cout << "Sent seq " << pkt.seq << std::endl;
+      std::cout << "Sent seq " << pkt.seqnum << std::endl;
       if (!timeout(recv_socket)) {
         packet recv = recv_pkt();
-        if (recv.checksum.compare(pkt.checksum) == 0 && recv.seq == pkt.seq
-            && recv.options & ACK && recv.options & DATA) {
+        std::cout << recv.to_json();
+        if (is_ack(recv, pkt) && valid_packet(recv, pkt)) {
           ack_received = true;
-          std::cout << "ACK " << recv.seq << " received" << std::endl;
+          std::cout << "ACK " << recv.seqnum << " received" << std::endl;
         }
 
       } else {
         std::cout << "timeout" << std::endl;
       }
     }
-    sequence_number = 1 - sequence_number;
+    sequence_number += segment.size();
+    sequence_number %= 65536;
   }
   fin();
 
@@ -101,15 +105,14 @@ bool RDT::fin() {
   ack_received = false;
   int timeout_count = 0;
   while (!ack_received) {
-    packet fin(FIN, "", sequence_number, "");
+    packet fin(PacketOptions::FIN, sequence_number, "");
     send_pkt(fin);
-    std::cout << "Sent FIN " << fin.seq << std::endl;
+    std::cout << "Sent FIN " << fin.seqnum << std::endl;
     if (!timeout(recv_socket)) {
       packet recv = recv_pkt();
-      if (recv.checksum.compare(fin.checksum) == 0 && recv.seq == fin.seq
-          && recv.options & FIN && recv.options & ACK) {
+      if (is_ack(recv, fin) && valid_packet(recv, fin)) {
         ack_received = true;
-        std::cout << "FIN-ACK " << recv.seq << " received" << std::endl;
+        std::cout << "FIN-ACK " << recv.seqnum << " received" << std::endl;
       }
     } else {
       std::cout << "timeout" << std::endl;
@@ -131,26 +134,34 @@ std::string RDT::recv(std::string destination_address, int destination_port) {
   while (!fin_received || !syn_received) {
     packet pkt = recv_pkt();
     packet ack_pkt = make_ack(pkt);
-
-    if ((checksum(pkt.payload).compare(pkt.checksum) == 0 && pkt.seq == sequence_number)
-        || pkt.options & SYN || pkt.options & FIN) {
-      send_pkt(ack_pkt);
-      if (pkt.options & SYN) {
-        sequence_number = 0;
+    if (valid_packet(ack_pkt, pkt)) {
+      //checksum valid
+      if (pkt.options & PacketOptions::SYN) {
+        sequence_number = pkt.seqnum;
         syn_received = true;
-      } else if (pkt.options & FIN) {
+      } else if (pkt.options & PacketOptions::FIN) {
         if (syn_received) {
           fin_received = true;
         }
-      } else if (pkt.seq == sequence_number) {
-        received.append(pkt.payload);
-        sequence_number = 1 - sequence_number;
+      } else {
+        if (pkt.seqnum == sequence_number) {
+          //got expected sequence number
+          received.append(pkt.payload);
+          sequence_number += pkt.payload.size();
+          sequence_number %= 65536;
+
+        } else {
+          //ack_pkt.seq = sequence_number;
+        }
       }
 
+
     } else {
-      ack_pkt.seq = 1 - sequence_number;
-      send_pkt(ack_pkt);
+      //invalid checksum
+      ack_pkt.seqnum = sequence_number;
     }
+    ack_pkt.acknum = (uint) sequence_number;
+    send_pkt(ack_pkt);
   }
   return received;
 }
@@ -175,11 +186,8 @@ packet RDT::recv_pkt() {
 }
 
 packet RDT::make_ack(packet pkt) {
-  packet ack_pkt;
-  ack_pkt.options = pkt.options | ACK;
-  ack_pkt.payload = "";
-  ack_pkt.seq = pkt.seq;
-  ack_pkt.checksum = pkt.checksum;
+  packet
+      ack_pkt(pkt.options | PacketOptions::ACK, PacketChecksum::checksum(pkt.payload), pkt.seqnum, pkt.payload.size());
   return ack_pkt;
 }
 
@@ -191,38 +199,20 @@ bool RDT::timeout(int socket) {
   return res == 0;
 }
 
-
-//checksum algorithm taken from
-// https://github.com/xhacker/RDT-over-UDP/blob/master/common.py
-//similar to
-// https://tools.ietf.org/html/rfc1071#section-4
-
-std::string RDT::checksum(std::string data) {
-  uint sum = 0;
-  size_t pos = data.size();
-  if (pos & 1) {
-    pos -= 1;
-    sum = (uint) data[pos];
-  } else {
-    sum = 0;
-  }
-
-  while (pos > 0) {
-    pos -= 2;
-    sum += ((uint) data[pos + 1] << 8) + (uint) data[pos];
-  }
-
-  sum = (sum >> 16) + (sum & 0xffff);
-  sum += (sum >> 16);
-
-  uint result;
-  result = (~sum) & 0xffff;
-  result = result >> 8 | ((result & 0xff) << 8);
-  std::string ret;
-  ret.push_back((char) (result / 256));
-  ret.push_back((char) (result % 256));
-  return ret;
+bool RDT::is_ack(packet response, packet request) {
+  return ((response.options & PacketOptions::ACK) != 0 &&
+      (response.options & request.options) != 0);
 }
+
+bool RDT::valid_packet(packet response, packet request) {
+  return ((response.checksum.compare(request.checksum) == 0) &&
+      response.seqnum == request.seqnum &&
+      response.seqnum > -1);
+}
+
+
+
+
 
 
 
